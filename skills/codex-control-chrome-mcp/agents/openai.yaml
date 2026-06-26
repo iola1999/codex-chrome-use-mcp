@@ -1,0 +1,10 @@
+interface:
+  display_name: "Codex Control Chrome MCP"
+  short_description: "Use Codex Chrome extension through MCP"
+  default_prompt: "Use $codex-control-chrome-mcp to control Chrome through the Codex Control Chrome MCP server."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "codex-control-chrome-mcp"
+      description: "Local stdio MCP server launched with npx -y codex-control-chrome-mcp@latest --stdio."
+      transport: "stdio"

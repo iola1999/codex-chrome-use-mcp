@@ -1,0 +1,222 @@
+# Codex Control Chrome MCP Architecture
+
+## Goal
+
+Expose the existing Codex Chrome extension flow to other Agent tools through an MCP stdio server.
+
+The important design constraint is that target machines may not have Codex App installed. Therefore this project must not depend on Codex App's private runtime, `node_repl`, or official `extension-host` being present.
+
+## Key Conclusion
+
+The Codex Chrome extension does not use Chrome remote debugging port. It uses:
+
+```text
+Chrome extension
+  -> chrome.runtime.connectNative("com.openai.codexextension")
+  -> native messaging host
+  -> JSON-RPC
+  -> chrome.debugger.attach / chrome.debugger.sendCommand
+```
+
+This is why it can reuse the normal Chrome profile, cookies, logged-in sessions, and installed extensions. The extension is already inside the normal profile and has the `debugger` permission.
+
+## Native Messaging Manifest
+
+Chrome native messaging is the registry layer that maps a string host name to a local executable.
+
+The installed Codex extension hard-codes the production host name:
+
+```text
+com.openai.codexextension
+```
+
+The extension is distributed as the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) and uses extension ID `hehggadaopoacecdllhhajmbjkdcmajg`.
+
+Chrome resolves that name through a manifest such as:
+
+```json
+{
+  "name": "com.openai.codexextension",
+  "path": "/absolute/path/to/codex-control-chrome-mcp",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/"
+  ]
+}
+```
+
+On macOS the manifest path is:
+
+```text
+~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json
+```
+
+The manifest does not contain a socket path. It only tells Chrome which executable to spawn when the extension calls `chrome.runtime.connectNative(hostName)`.
+
+## Host Name Binding
+
+The host name must match the extension's `connectNative()` argument. The current Web Store extension will not connect to a different name such as `com.example.chromeuse`.
+
+Therefore, without modifying/repacking the extension, this project must register as:
+
+```text
+com.openai.codexextension
+```
+
+## Install and Uninstall Strategy
+
+Installing this project replaces the manifest path, not the original binary.
+
+The installer must:
+
+1. Read the current `com.openai.codexextension.json`.
+2. Copy it to the same directory with a timestamped backup suffix.
+3. Write a new manifest that points to `codex-control-chrome-mcp`.
+4. Store install state in `~/.codex-control-chrome-mcp/install-state.json`.
+5. Store the original official host path in `~/.codex-control-chrome-mcp/config.json` for proxy mode.
+
+Uninstalling restores the backed-up manifest.
+
+This means the official Codex binary is not modified or deleted.
+
+## Coexistence With Codex App
+
+Only one native host manifest can own `com.openai.codexextension` at a time. True side-by-side registration under two names is not possible with the unmodified official extension.
+
+Coexistence is possible through a same-name proxy:
+
+```text
+Chrome extension
+  -> com.openai.codexextension
+  -> codex-control-chrome-mcp native host
+       -> local MCP bridge socket
+       -> optional official extension-host child process
+```
+
+Proxy behavior:
+
+1. Requests from MCP use an internal ID prefix such as `codex-control-chrome-mcp:*`.
+2. Responses with that prefix are routed back to MCP.
+3. Official Codex requests/responses are forwarded to the original `extension-host`.
+4. Extension notifications such as `onCDPEvent` are broadcast to MCP clients and forwarded to the official host.
+
+If the MCP stdio server is stopped but the native host proxy is still running, Codex can continue working. If the native host proxy is removed, run uninstall to restore the original manifest.
+
+## Process Layers
+
+```text
+Other Agent
+  -> MCP stdio
+  -> npx -y codex-control-chrome-mcp@latest --stdio
+  -> /tmp/codex-browser-use/codex-control-chrome-mcp-*.sock
+  -> codex-control-chrome-mcp --native-host
+  -> Chrome native messaging stdio
+  -> Codex Chrome extension
+  -> chrome.debugger
+```
+
+The `--stdio` process is short-lived and Agent-facing.
+
+The `--native-host` process is Chrome-facing and owns the extension connection.
+
+MCP stdio is implemented with the official TypeScript SDK:
+
+```js
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+```
+
+The project does not hand-roll MCP message parsing. The custom 4-byte length-prefixed framing is only for Chrome Native Messaging and the local bridge socket.
+
+## CDP Flow
+
+MCP tools call the local bridge with JSON-RPC:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "mcp:1",
+  "method": "executeCdp",
+  "params": {
+    "session_id": "codex-control-chrome-mcp-session",
+    "turn_id": "turn-1",
+    "target": { "tabId": 123 },
+    "method": "Runtime.evaluate",
+    "commandParams": {
+      "expression": "document.title",
+      "returnByValue": true
+    }
+  }
+}
+```
+
+The native host forwards this to the extension, which calls:
+
+```js
+chrome.debugger.sendCommand({ tabId }, method, commandParams)
+```
+
+CDP events come back as notifications:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "onCDPEvent",
+  "params": {
+    "source": { "tabId": 123 },
+    "method": "Network.requestWillBeSent",
+    "params": {}
+  }
+}
+```
+
+## Reusing Codex Logic
+
+The preferred long-term reuse point is Codex's `browser-client.mjs`, not the official `extension-host` socket.
+
+Codex App normally provides private runtime objects:
+
+```text
+globalThis.nodeRepl.nativePipe
+globalThis.nodeRepl.requestMeta["x-codex-turn-metadata"]
+globalThis.nodeRepl.env
+globalThis.nodeRepl.cwd
+globalThis.nodeRepl.emitImage()
+globalThis.nodeRepl.setResponseMeta()
+```
+
+This project can shim those APIs and point `nativePipe.createConnection()` at its own bridge socket. That lets the vendored `browser-client.mjs` reuse its existing high-level browser logic while avoiding Codex App as a dependency.
+
+The initial implementation exposes direct MCP tools first. Vendoring `browser-client.mjs` should be a later phase after the native host bridge is stable.
+
+## NPX Runtime Model
+
+The intended distribution model is npm plus NPX, not a single packaged binary.
+
+Agent-side MCP config should use:
+
+```json
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "codex-control-chrome-mcp@latest", "--stdio"]
+}
+```
+
+Chrome Native Messaging manifests cannot store command arguments. Therefore `install-native-host` creates a stable launcher script:
+
+```sh
+npx -y codex-control-chrome-mcp@latest install-native-host
+```
+
+```text
+~/.codex-control-chrome-mcp/native-host-launcher
+```
+
+That launcher runs:
+
+```sh
+npx -y codex-control-chrome-mcp@1.0.0 --native-host "$@"
+```
+
+The native host manifest points to the launcher, not directly to `npx`.

@@ -1,0 +1,50 @@
+{
+  "name": "codex-control-chrome-mcp",
+  "version": "1.0.0",
+  "description": "MCP server and native host bridge for controlling Chrome through the Codex Chrome extension.",
+  "type": "module",
+  "bin": {
+    "codex-control-chrome-mcp": "bin/codex-control-chrome-mcp.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iola1999/codex-control-chrome-mcp.git"
+  },
+  "homepage": "https://github.com/iola1999/codex-control-chrome-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/iola1999/codex-control-chrome-mcp/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "codex",
+    "mcp",
+    "chrome",
+    "chrome-extension",
+    "cdp",
+    "native-messaging",
+    "browser-automation",
+    "agent-tools"
+  ],
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "skills",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node ./bin/codex-control-chrome-mcp.js --stdio",
+    "native-host": "node ./bin/codex-control-chrome-mcp.js --native-host",
+    "status": "node ./bin/codex-control-chrome-mcp.js status",
+    "check": "node --check ./bin/codex-control-chrome-mcp.js && node --check ./src/*.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}
