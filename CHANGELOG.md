@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-26
+
 ### Added
 
 - Open source governance files.
