@@ -2,6 +2,7 @@
   "name": "codex-control-chrome-mcp",
   "version": "1.0.0",
   "description": "MCP server and native host bridge for controlling Chrome through the Codex Chrome extension.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "codex-control-chrome-mcp": "bin/codex-control-chrome-mcp.js"
@@ -32,13 +33,18 @@
     "src",
     "docs",
     "skills",
-    "README.md"
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "start": "node ./bin/codex-control-chrome-mcp.js --stdio",
     "native-host": "node ./bin/codex-control-chrome-mcp.js --native-host",
     "status": "node ./bin/codex-control-chrome-mcp.js status",
-    "check": "node --check ./bin/codex-control-chrome-mcp.js && node --check ./src/*.js"
+    "check": "node --check ./bin/codex-control-chrome-mcp.js && node --check ./src/*.js && node --check ./test/*.test.js",
+    "test": "node --test",
+    "ci": "npm run check && npm test && npm pack --dry-run"
   },
   "engines": {
     "node": ">=20"

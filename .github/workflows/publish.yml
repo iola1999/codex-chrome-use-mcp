@@ -1,0 +1,41 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Ensure modern npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release tag
+        run: |
+          node -e 'const pkg=require("./package.json"); const tag=process.env.GITHUB_REF_NAME; if (tag !== "v" + pkg.version) { throw new Error("Tag " + tag + " does not match package version v" + pkg.version); }'
+
+      - name: Run checks
+        run: npm run ci
+
+      - name: Publish to npm
+        run: npm publish

@@ -4,12 +4,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { connectBridge, listBridgeSockets } from "./bridge-client.js";
 import { nativeHostManifestPath } from "./constants.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
 export async function runMcpServer() {
   const runtime = new ChromeUseRuntime();
   const server = new McpServer({
-    name: "codex-control-chrome-mcp",
-    version: "1.0.0",
+    name: PACKAGE_NAME,
+    version: PACKAGE_VERSION,
   });
 
   registerTools(server, runtime);

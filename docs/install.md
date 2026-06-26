@@ -17,6 +17,16 @@ The current implementation provides:
 
 Do not run install on a machine where Codex Chrome integration is important unless you are ready to test proxy mode or restore from backup.
 
+This is an independent community project. It is not affiliated with OpenAI, Codex, Google, or Chrome.
+
+## Platform Support
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| macOS | Tested | Primary supported platform. |
+| Linux | Experimental | Uses the Google Chrome user-level Native Messaging host directory. |
+| Windows | Unsupported | Chrome Native Messaging registration uses registry keys on Windows and is not implemented yet. |
+
 ## Install
 
 First install and enable the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) in the Chrome profile you want to automate.
@@ -43,11 +53,18 @@ The installer:
 2. Backs it up in the same directory with a timestamped suffix.
 3. Writes a new manifest pointing to this project's CLI.
 4. Records restore metadata in `~/.codex-control-chrome-mcp/install-state.json`.
+5. Records the previous host path for proxy mode when available.
 
 Example manifest path on macOS:
 
 ```text
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json
+```
+
+Example manifest path on Linux:
+
+```text
+~/.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json
 ```
 
 ## MCP Client Config
@@ -117,3 +134,24 @@ If the extension is missing, install the [Codex Chrome Extension](https://chrome
 Stopping the MCP stdio process does not uninstall the native host. Uninstall explicitly to restore the original manifest.
 
 The MCP stdio server uses the official `@modelcontextprotocol/sdk` package and must not write logs to stdout. Use stderr for diagnostics.
+
+## Troubleshooting
+
+If `status` shows no sockets:
+
+1. Confirm Chrome is running with the profile where the extension is installed.
+2. Reload or disable/enable the Codex Chrome Extension.
+3. Run `npx -y codex-control-chrome-mcp@latest status`.
+4. Check that the active manifest path points to `~/.codex-control-chrome-mcp/native-host-launcher`.
+
+If Codex App integration is affected, uninstall this project:
+
+```bash
+npx -y codex-control-chrome-mcp@latest uninstall-native-host
+```
+
+If the recorded backup is stale or manually changed, inspect the manifest and use `--force` only when you intentionally want to restore/remove the current project manifest.
+
+## Publishing
+
+This package is published from GitHub Actions through npm Trusted Publishing. See [Release Process](./release.md).

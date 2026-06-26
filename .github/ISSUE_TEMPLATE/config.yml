@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: mailto:iola1999@foxmail.com
+    about: Report vulnerabilities privately.

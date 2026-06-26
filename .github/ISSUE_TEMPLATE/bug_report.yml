@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a reproducible problem with Codex Control Chrome MCP.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include browser cookies, password-store data, session databases, tokens, or private page contents.
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: Run `npx -y codex-control-chrome-mcp@latest --help` or check `package.json`.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js and npm versions
+      placeholder: "node v24.x, npm 11.x"
+    validations:
+      required: true
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version
+      placeholder: "Chrome 126.x"
+  - type: input
+    id: agent
+    attributes:
+      label: MCP client or Agent tool
+      placeholder: "Claude Desktop, Codex, Cursor, etc."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest steps that reproduce the issue.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Call tool ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Status output
+      description: Paste `npx -y codex-control-chrome-mcp@latest status` output with sensitive local paths redacted if needed.
+      render: json

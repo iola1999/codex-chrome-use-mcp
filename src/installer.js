@@ -8,19 +8,20 @@ import {
   INSTALL_STATE_PATH,
   nativeHostManifestPath,
 } from "./constants.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
-const PACKAGE_NAME = "codex-control-chrome-mcp";
-const PACKAGE_VERSION = "1.0.0";
 const MANIFEST_DESCRIPTION = "Codex Control Chrome MCP native messaging host";
 
-export async function installNativeHost({ binPath, proxy = true } = {}) {
-  const manifestPath = nativeHostManifestPath();
+export async function installNativeHost({ binPath, proxy = true, paths = defaultInstallPaths() } = {}) {
+  const { manifestPath, appStateDir, configPath, installStatePath } = paths;
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-  await fs.mkdir(APP_STATE_DIR, { recursive: true });
+  await fs.mkdir(appStateDir, { recursive: true });
 
-  const hostPath = binPath ? await createLocalLauncher(path.resolve(binPath)) : await createNpxLauncher();
+  const hostPath = binPath
+    ? await createLocalLauncher(path.resolve(binPath), appStateDir)
+    : await createNpxLauncher(appStateDir);
   const existing = await readJsonIfExists(manifestPath);
-  const previousState = await readJsonIfExists(INSTALL_STATE_PATH);
+  const previousState = await readJsonIfExists(installStatePath);
   const previousBackup = previousState?.backupPath
     ? await readJsonIfExists(previousState.backupPath)
     : null;
@@ -69,14 +70,14 @@ export async function installNativeHost({ binPath, proxy = true } = {}) {
     officialHostPath,
     proxy,
   };
-  await fs.writeFile(APP_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  await fs.writeFile(INSTALL_STATE_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await fs.writeFile(installStatePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
 }
 
-export async function uninstallNativeHost({ force = false } = {}) {
-  const manifestPath = nativeHostManifestPath();
-  const state = await readJsonIfExists(INSTALL_STATE_PATH);
+export async function uninstallNativeHost({ force = false, paths = defaultInstallPaths() } = {}) {
+  const { manifestPath, installStatePath } = paths;
+  const state = await readJsonIfExists(installStatePath);
   const manifest = await readJsonIfExists(manifestPath);
 
   if (!manifest && !state?.backupPath) {
@@ -99,10 +100,19 @@ export async function uninstallNativeHost({ force = false } = {}) {
 }
 
 export async function nativeHostInstallStatus() {
-  const manifestPath = nativeHostManifestPath();
+  const { manifestPath, installStatePath } = defaultInstallPaths();
   const manifest = await readJsonIfExists(manifestPath);
-  const state = await readJsonIfExists(INSTALL_STATE_PATH);
+  const state = await readJsonIfExists(installStatePath);
   return { manifestPath, manifest, state };
+}
+
+function defaultInstallPaths() {
+  return {
+    manifestPath: nativeHostManifestPath(),
+    appStateDir: APP_STATE_DIR,
+    configPath: APP_CONFIG_PATH,
+    installStatePath: INSTALL_STATE_PATH,
+  };
 }
 
 async function backupManifest(manifestPath) {
@@ -115,11 +125,11 @@ async function backupManifest(manifestPath) {
   return backupPath;
 }
 
-async function createNpxLauncher() {
+async function createNpxLauncher(appStateDir) {
   if (process.platform === "win32") {
     throw new Error("NPX native host launcher installation is not implemented for Windows yet.");
   }
-  const launcherPath = path.join(APP_STATE_DIR, "native-host-launcher");
+  const launcherPath = path.join(appStateDir, "native-host-launcher");
   const script = `#!/usr/bin/env sh
 exec npx -y ${PACKAGE_NAME}@${PACKAGE_VERSION} --native-host "$@"
 `;
@@ -132,14 +142,14 @@ function isProjectManifest(manifest) {
   return manifest?.description === MANIFEST_DESCRIPTION;
 }
 
-async function createLocalLauncher(binPath) {
+async function createLocalLauncher(binPath, appStateDir) {
   if (process.platform === "win32") {
     return binPath;
   }
   if (!binPath.endsWith(".js")) {
     return binPath;
   }
-  const launcherPath = path.join(APP_STATE_DIR, "native-host-local-launcher");
+  const launcherPath = path.join(appStateDir, "native-host-local-launcher");
   const script = `#!/usr/bin/env sh
 exec ${shellQuote(process.execPath)} ${shellQuote(binPath)} "$@"
 `;
