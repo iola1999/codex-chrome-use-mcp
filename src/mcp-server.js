@@ -4,9 +4,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { connectBridge, listBridgeSockets } from "./bridge-client.js";
 import { nativeHostManifestPath } from "./constants.js";
+import { ensureNativeHostRegistered } from "./installer.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
 export async function runMcpServer() {
+  await autoRegisterNativeHost();
   const runtime = new ChromeUseRuntime();
   const server = new McpServer({
     name: PACKAGE_NAME,
@@ -17,6 +19,32 @@ export async function runMcpServer() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+/**
+ * On stdio startup, re-assert our native-host manifest if a Codex update (or
+ * anything else) reverted it. Best-effort and silent: it only logs to stderr
+ * (stdout is the MCP JSON-RPC channel) and never blocks server startup.
+ * Opt out with CODEX_CONTROL_CHROME_NO_AUTO_REGISTER=1.
+ *
+ * Note: re-asserting the manifest only takes effect on the Chrome extension's
+ * next Native Messaging connection (reload the extension or restart Chrome).
+ */
+async function autoRegisterNativeHost() {
+  if (process.env.CODEX_CONTROL_CHROME_NO_AUTO_REGISTER === "1") return;
+  try {
+    const result = await ensureNativeHostRegistered();
+    if (result.action === "re-registered") {
+      process.stderr.write(
+        `[codex-control-chrome-mcp] native host manifest was ${result.reason}; re-registered it. ` +
+          "Reload the Codex Chrome extension (or restart Chrome) to reconnect the bridge.\n",
+      );
+    }
+  } catch (error) {
+    process.stderr.write(
+      `[codex-control-chrome-mcp] auto-register skipped: ${error?.message ?? error}\n`,
+    );
+  }
 }
 
 class ChromeUseRuntime {

@@ -8,9 +8,15 @@ import {
   INSTALL_STATE_PATH,
   nativeHostManifestPath,
 } from "./constants.js";
+import {
+  MANIFEST_DESCRIPTION,
+  classifyHost,
+  inspectHostBinary,
+  isOfficialCodexManifest,
+  isOurLauncherPath,
+  isProjectManifest,
+} from "./host-identity.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
-
-const MANIFEST_DESCRIPTION = "Codex Control Chrome MCP native messaging host";
 
 export async function installNativeHost({ binPath, proxy = true, paths = defaultInstallPaths() } = {}) {
   const { manifestPath, appStateDir, configPath, installStatePath } = paths;
@@ -34,23 +40,9 @@ export async function installNativeHost({ binPath, proxy = true, paths = default
     backupPath = previousState.backupPath;
   }
 
-  let officialHostPath = null;
-  if (proxy && previousBackup?.path && !previousBackupIsOurs) {
-    officialHostPath = previousBackup.path;
-  } else if (
-    proxy &&
-    typeof previousState?.officialHostPath === "string" &&
-    path.resolve(previousState.officialHostPath) !== path.resolve(hostPath)
-  ) {
-    officialHostPath = previousState.officialHostPath;
-  } else if (
-    proxy &&
-    existing?.path &&
-    !existingIsOurs &&
-    path.resolve(existing.path) !== path.resolve(hostPath)
-  ) {
-    officialHostPath = existing.path;
-  }
+  const officialHostPath = proxy
+    ? await resolveOfficialHostPath({ existing, existingIsOurs, previousState, previousBackup, hostPath })
+    : null;
 
   const manifest = {
     allowed_origins: [`chrome-extension://${CODEX_EXTENSION_ID}/`],
@@ -65,6 +57,7 @@ export async function installNativeHost({ binPath, proxy = true, paths = default
     installedAt: new Date().toISOString(),
     manifestPath,
     hostPath,
+    binPath: binPath ? path.resolve(binPath) : null,
     launchMode: binPath ? "direct-bin" : "npx-launcher",
     backupPath,
     officialHostPath,
@@ -73,6 +66,82 @@ export async function installNativeHost({ binPath, proxy = true, paths = default
   await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   await fs.writeFile(installStatePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
+}
+
+/**
+ * Resolve the genuine OpenAI host to proxy to. Authority order:
+ *   1. the live manifest, when it is verifiably OpenAI's (most up to date),
+ *   2. the previously recorded official host,
+ *   3. the backed-up manifest's path.
+ * Self-references and our own launcher are dropped, and a candidate whose file
+ * still exists is preferred so a renamed/removed host (e.g. after a Codex
+ * update) never gets recorded as the official target.
+ */
+async function resolveOfficialHostPath({ existing, existingIsOurs, previousState, previousBackup, hostPath }) {
+  const candidates = [];
+  if (existing?.path && !existingIsOurs && isOfficialCodexManifest(existing)) {
+    candidates.push(existing.path);
+  }
+  if (typeof previousState?.officialHostPath === "string") {
+    candidates.push(previousState.officialHostPath);
+  }
+  if (previousBackup?.path && !isProjectManifest(previousBackup)) {
+    candidates.push(previousBackup.path);
+  }
+
+  const seen = new Set();
+  const unique = [];
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (resolved === path.resolve(hostPath) || isOurLauncherPath(candidate) || seen.has(resolved)) {
+      continue;
+    }
+    seen.add(resolved);
+    unique.push(candidate);
+  }
+
+  for (const candidate of unique) {
+    if ((await inspectHostBinary(candidate)).exists) return candidate;
+  }
+  // None of the candidates exist on disk; fall back to the most authoritative
+  // one (the live official manifest) for diagnostics rather than inventing null.
+  return unique[0] ?? null;
+}
+
+/**
+ * Idempotently re-assert a previously-established install. Used on stdio
+ * startup so a Codex update that reclaims the manifest self-heals without a
+ * manual `install-native-host`. Never bootstraps a fresh install silently.
+ */
+export async function ensureNativeHostRegistered({ paths = defaultInstallPaths() } = {}) {
+  const { manifestPath, installStatePath } = paths;
+  const state = await readJsonIfExists(installStatePath);
+  if (!state || typeof state.hostPath !== "string") {
+    return { action: "skip", reason: "not-installed" };
+  }
+
+  const manifest = await readJsonIfExists(manifestPath);
+  const pointsToUs =
+    isProjectManifest(manifest) &&
+    typeof manifest?.path === "string" &&
+    path.resolve(manifest.path) === path.resolve(state.hostPath);
+  const launcherExists = (await inspectHostBinary(state.hostPath)).exists;
+  if (pointsToUs && launcherExists) {
+    return { action: "ok", reason: "already-registered" };
+  }
+
+  const result = await installNativeHost({
+    binPath: state.launchMode === "direct-bin" ? state.binPath ?? undefined : undefined,
+    proxy: state.proxy !== false,
+    paths,
+  });
+  return {
+    action: "re-registered",
+    reason: launcherExists ? "manifest-reverted" : "launcher-missing",
+    manifestPath,
+    hostPath: result.hostPath,
+    officialHostPath: result.officialHostPath,
+  };
 }
 
 export async function uninstallNativeHost({ force = false, paths = defaultInstallPaths() } = {}) {
@@ -103,7 +172,13 @@ export async function nativeHostInstallStatus() {
   const { manifestPath, installStatePath } = defaultInstallPaths();
   const manifest = await readJsonIfExists(manifestPath);
   const state = await readJsonIfExists(installStatePath);
-  return { manifestPath, manifest, state };
+  const classification = await classifyHost({ manifest, hostPath: manifest?.path });
+  const registered =
+    isProjectManifest(manifest) &&
+    typeof state?.hostPath === "string" &&
+    typeof manifest?.path === "string" &&
+    path.resolve(manifest.path) === path.resolve(state.hostPath);
+  return { manifestPath, manifest, state, registered, classification };
 }
 
 function defaultInstallPaths() {
@@ -136,10 +211,6 @@ exec npx -y ${PACKAGE_NAME}@${PACKAGE_VERSION} --native-host "$@"
   await fs.writeFile(launcherPath, script, { encoding: "utf8", mode: 0o755 });
   await fs.chmod(launcherPath, 0o755);
   return launcherPath;
-}
-
-function isProjectManifest(manifest) {
-  return manifest?.description === MANIFEST_DESCRIPTION;
 }
 
 async function createLocalLauncher(binPath, appStateDir) {

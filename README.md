@@ -144,6 +144,14 @@ node ./bin/codex-control-chrome-mcp.js --native-host
 
 ## Troubleshooting
 
+`status` reports a `registered` flag and a `classification` of the live manifest. When `registered` is `false` and `classification.kind` is `official-openai`, a Codex update has reclaimed the manifest (see below). `classification` identifies OpenAI's genuine host by stable signals — the `com.openai.codexextension` name, the official extension origin, the bundle path, the binary format, and (on macOS) the OpenAI code signature — not by filename.
+
+### A Codex update stopped the bridge
+
+Codex App/extension updates re-register their own `com.openai.codexextension` native-messaging manifest, which overwrites this project's proxy registration (the bundled host binary has even been renamed across releases). The symptom is `status` showing `sockets: []`, `registered: false`, and a manifest `path` back inside the Codex bundle.
+
+The MCP stdio server now **self-heals**: on startup it re-asserts the manifest when it detects it was reverted, so you usually do not need to re-run `install-native-host`. Because Chrome only reads the manifest when the extension reconnects, **reload the Codex Chrome Extension (or restart Chrome) once** after a Codex update to bring the bridge back. Set `CODEX_CONTROL_CHROME_NO_AUTO_REGISTER=1` to disable the auto re-register.
+
 If `status` shows no bridge sockets, reload Chrome or the Codex Chrome Extension after installing the native host.
 
 If Codex App integration stops working, uninstall this native host to restore the backed-up manifest:
