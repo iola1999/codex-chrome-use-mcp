@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-27
+
 ### Added
 
 - Self-healing native host registration: the MCP stdio server re-asserts the manifest on startup when a Codex update reverts it (opt out with `CODEX_CONTROL_CHROME_NO_AUTO_REGISTER=1`).
