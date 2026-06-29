@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  APP_CONFIG_PATH,
   APP_STATE_DIR,
   CODEX_EXTENSION_ID,
   CODEX_NATIVE_HOST_NAME,
-  INSTALL_STATE_PATH,
+  DEFAULT_BROWSER,
+  SUPPORTED_BROWSERS,
+  browserProfileDir,
+  configPathFor,
+  installStatePathFor,
   nativeHostManifestPath,
 } from "./constants.js";
 import {
@@ -18,14 +21,20 @@ import {
 } from "./host-identity.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
-export async function installNativeHost({ binPath, proxy = true, paths = defaultInstallPaths() } = {}) {
+export async function installNativeHost({
+  binPath,
+  proxy = true,
+  browser = DEFAULT_BROWSER,
+  paths = defaultInstallPaths(browser),
+} = {}) {
   const { manifestPath, appStateDir, configPath, installStatePath } = paths;
+  const browserId = paths.browser ?? browser;
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
   await fs.mkdir(appStateDir, { recursive: true });
 
   const hostPath = binPath
-    ? await createLocalLauncher(path.resolve(binPath), appStateDir)
-    : await createNpxLauncher(appStateDir);
+    ? await createLocalLauncher(path.resolve(binPath), appStateDir, browserId)
+    : await createNpxLauncher(appStateDir, browserId);
   const existing = await readJsonIfExists(manifestPath);
   const previousState = await readJsonIfExists(installStatePath);
   const previousBackup = previousState?.backupPath
@@ -55,6 +64,7 @@ export async function installNativeHost({ binPath, proxy = true, paths = default
 
   const config = {
     installedAt: new Date().toISOString(),
+    browser: browserId,
     manifestPath,
     hostPath,
     binPath: binPath ? path.resolve(binPath) : null,
@@ -113,7 +123,10 @@ async function resolveOfficialHostPath({ existing, existingIsOurs, previousState
  * startup so a Codex update that reclaims the manifest self-heals without a
  * manual `install-native-host`. Never bootstraps a fresh install silently.
  */
-export async function ensureNativeHostRegistered({ paths = defaultInstallPaths() } = {}) {
+export async function ensureNativeHostRegistered({
+  browser = DEFAULT_BROWSER,
+  paths = defaultInstallPaths(browser),
+} = {}) {
   const { manifestPath, installStatePath } = paths;
   const state = await readJsonIfExists(installStatePath);
   if (!state || typeof state.hostPath !== "string") {
@@ -144,7 +157,11 @@ export async function ensureNativeHostRegistered({ paths = defaultInstallPaths()
   };
 }
 
-export async function uninstallNativeHost({ force = false, paths = defaultInstallPaths() } = {}) {
+export async function uninstallNativeHost({
+  force = false,
+  browser = DEFAULT_BROWSER,
+  paths = defaultInstallPaths(browser),
+} = {}) {
   const { manifestPath, installStatePath } = paths;
   const state = await readJsonIfExists(installStatePath);
   const manifest = await readJsonIfExists(manifestPath);
@@ -168,8 +185,11 @@ export async function uninstallNativeHost({ force = false, paths = defaultInstal
   return { ok: true, action: "removed", manifestPath };
 }
 
-export async function nativeHostInstallStatus() {
-  const { manifestPath, installStatePath } = defaultInstallPaths();
+export async function nativeHostInstallStatus({
+  browser = DEFAULT_BROWSER,
+  paths = defaultInstallPaths(browser),
+} = {}) {
+  const { manifestPath, installStatePath } = paths;
   const manifest = await readJsonIfExists(manifestPath);
   const state = await readJsonIfExists(installStatePath);
   const classification = await classifyHost({ manifest, hostPath: manifest?.path });
@@ -178,15 +198,47 @@ export async function nativeHostInstallStatus() {
     typeof state?.hostPath === "string" &&
     typeof manifest?.path === "string" &&
     path.resolve(manifest.path) === path.resolve(state.hostPath);
-  return { manifestPath, manifest, state, registered, classification };
+  return { browser: paths.browser ?? browser, manifestPath, manifest, state, registered, classification };
 }
 
-function defaultInstallPaths() {
+/** Browsers whose user profile directory exists on this machine (install targets). */
+export async function detectInstalledBrowsers() {
+  const present = [];
+  for (const browser of SUPPORTED_BROWSERS) {
+    let dir;
+    try {
+      dir = browserProfileDir(browser);
+    } catch {
+      continue; // unsupported platform for this browser
+    }
+    try {
+      await fs.access(dir);
+      present.push(browser);
+    } catch {
+      // profile directory absent -> browser not installed (or never launched)
+    }
+  }
+  return present;
+}
+
+/** Browsers we have previously installed for (an install-state file exists). */
+export async function detectManagedBrowsers() {
+  const managed = [];
+  for (const browser of SUPPORTED_BROWSERS) {
+    if (await readJsonIfExists(installStatePathFor(browser))) {
+      managed.push(browser);
+    }
+  }
+  return managed;
+}
+
+function defaultInstallPaths(browser = DEFAULT_BROWSER) {
   return {
-    manifestPath: nativeHostManifestPath(),
+    browser,
+    manifestPath: nativeHostManifestPath(browser),
     appStateDir: APP_STATE_DIR,
-    configPath: APP_CONFIG_PATH,
-    installStatePath: INSTALL_STATE_PATH,
+    configPath: configPathFor(browser),
+    installStatePath: installStatePathFor(browser),
   };
 }
 
@@ -200,29 +252,36 @@ async function backupManifest(manifestPath) {
   return backupPath;
 }
 
-async function createNpxLauncher(appStateDir) {
+// Each browser gets its own launcher so the native host knows which browser's
+// config to read for proxy mode. Chrome keeps the original unsuffixed filename
+// so manifests written before multi-browser support still resolve.
+function launcherFileName(base, browser) {
+  return browser === DEFAULT_BROWSER ? base : `${base}-${browser}`;
+}
+
+async function createNpxLauncher(appStateDir, browser = DEFAULT_BROWSER) {
   if (process.platform === "win32") {
     throw new Error("NPX native host launcher installation is not implemented for Windows yet.");
   }
-  const launcherPath = path.join(appStateDir, "native-host-launcher");
+  const launcherPath = path.join(appStateDir, launcherFileName("native-host-launcher", browser));
   const script = `#!/usr/bin/env sh
-exec npx -y ${PACKAGE_NAME}@${PACKAGE_VERSION} --native-host "$@"
+exec npx -y ${PACKAGE_NAME}@${PACKAGE_VERSION} --native-host --browser ${browser} "$@"
 `;
   await fs.writeFile(launcherPath, script, { encoding: "utf8", mode: 0o755 });
   await fs.chmod(launcherPath, 0o755);
   return launcherPath;
 }
 
-async function createLocalLauncher(binPath, appStateDir) {
+async function createLocalLauncher(binPath, appStateDir, browser = DEFAULT_BROWSER) {
   if (process.platform === "win32") {
     return binPath;
   }
   if (!binPath.endsWith(".js")) {
     return binPath;
   }
-  const launcherPath = path.join(appStateDir, "native-host-local-launcher");
+  const launcherPath = path.join(appStateDir, launcherFileName("native-host-local-launcher", browser));
   const script = `#!/usr/bin/env sh
-exec ${shellQuote(process.execPath)} ${shellQuote(binPath)} "$@"
+exec ${shellQuote(process.execPath)} ${shellQuote(binPath)} --browser ${browser} "$@"
 `;
   await fs.writeFile(launcherPath, script, { encoding: "utf8", mode: 0o755 });
   await fs.chmod(launcherPath, 0o755);

@@ -6,6 +6,19 @@ This project follows semantic versioning.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-29
+
+### Added
+
+- Microsoft Edge support as a first-class browser alongside Chrome. `install-native-host`, `uninstall-native-host`, and `status` accept `--browser <chrome|edge|all>`.
+- Auto-detection: without `--browser`, `install-native-host` installs for every supported browser whose profile directory exists, `uninstall-native-host` targets every browser it previously installed for, and `status` reports both browsers.
+- The MCP stdio server's self-heal now re-asserts the manifest for every browser it manages, not just Chrome.
+
+### Changed
+
+- Native host install state is now stored per browser (`install-state.<browser>.json` / `config.<browser>.json`). Chrome keeps the original unsuffixed filenames, so existing installs remain valid; Edge no longer clobbers Chrome's restore and self-heal metadata.
+- `status` output now nests install state under each browser (`install.chrome`, `install.edge`). The `chrome_status` MCP tool additionally reports `manifestPaths` for every supported browser.
+
 ## [1.1.0] - 2026-06-27
 
 ### Added

@@ -3,8 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { connectBridge, listBridgeSockets } from "./bridge-client.js";
-import { nativeHostManifestPath } from "./constants.js";
-import { ensureNativeHostRegistered } from "./installer.js";
+import { SUPPORTED_BROWSERS, nativeHostManifestPath } from "./constants.js";
+import { detectManagedBrowsers, ensureNativeHostRegistered } from "./installer.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
 export async function runMcpServer() {
@@ -32,19 +32,32 @@ export async function runMcpServer() {
  */
 async function autoRegisterNativeHost() {
   if (process.env.CODEX_CONTROL_CHROME_NO_AUTO_REGISTER === "1") return;
+  let browsers = [];
   try {
-    const result = await ensureNativeHostRegistered();
-    if (result.action === "re-registered") {
+    browsers = await detectManagedBrowsers();
+  } catch {
+    browsers = [];
+  }
+  for (const browser of browsers) {
+    try {
+      const result = await ensureNativeHostRegistered({ browser });
+      if (result.action === "re-registered") {
+        process.stderr.write(
+          `[codex-control-chrome-mcp] native host manifest for ${browser} was ${result.reason}; ` +
+            `re-registered it. Reload the Codex extension (or restart ${browserLabel(browser)}) ` +
+            "to reconnect the bridge.\n",
+        );
+      }
+    } catch (error) {
       process.stderr.write(
-        `[codex-control-chrome-mcp] native host manifest was ${result.reason}; re-registered it. ` +
-          "Reload the Codex Chrome extension (or restart Chrome) to reconnect the bridge.\n",
+        `[codex-control-chrome-mcp] auto-register (${browser}) skipped: ${error?.message ?? error}\n`,
       );
     }
-  } catch (error) {
-    process.stderr.write(
-      `[codex-control-chrome-mcp] auto-register skipped: ${error?.message ?? error}\n`,
-    );
   }
+}
+
+function browserLabel(browser) {
+  return browser === "edge" ? "Edge" : "Chrome";
 }
 
 class ChromeUseRuntime {
@@ -83,11 +96,14 @@ function registerTools(server, runtime) {
   server.registerTool(
     "chrome_status",
     {
-      description: "Show native host manifest path and discovered bridge sockets.",
+      description: "Show native host manifest paths and discovered bridge sockets.",
       inputSchema: {},
     },
     async () => toolResult({
       manifestPath: nativeHostManifestPath(),
+      manifestPaths: Object.fromEntries(
+        SUPPORTED_BROWSERS.map((browser) => [browser, nativeHostManifestPath(browser)]),
+      ),
       sockets: await listBridgeSockets(),
     }),
   );

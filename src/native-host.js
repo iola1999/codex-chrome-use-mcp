@@ -3,12 +3,17 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { APP_CONFIG_PATH, BRIDGE_SOCKET_DIR, BRIDGE_SOCKET_PREFIX } from "./constants.js";
+import {
+  BRIDGE_SOCKET_DIR,
+  BRIDGE_SOCKET_PREFIX,
+  DEFAULT_BROWSER,
+  configPathFor,
+} from "./constants.js";
 import { LengthPrefixedJsonPeer } from "./framing.js";
 
 const LOCAL_ID_PREFIX = "codex-control-chrome-mcp:";
 
-export async function runNativeHost({ origin = process.argv[2] } = {}) {
+export async function runNativeHost({ origin = process.argv[2], browser = DEFAULT_BROWSER } = {}) {
   await fs.mkdir(BRIDGE_SOCKET_DIR, { recursive: true });
   const socketPath = path.join(
     BRIDGE_SOCKET_DIR,
@@ -21,7 +26,7 @@ export async function runNativeHost({ origin = process.argv[2] } = {}) {
     name: "chrome-extension",
   });
 
-  const proxyPeer = await maybeStartOfficialProxy(origin);
+  const proxyPeer = await maybeStartOfficialProxy(origin, browser);
   const bridge = new NativeHostBridge({ extensionPeer, proxyPeer });
   await bridge.listen(socketPath);
 
@@ -201,8 +206,8 @@ class NativeHostBridge {
   }
 }
 
-async function maybeStartOfficialProxy(origin) {
-  const config = await readJsonIfExists(APP_CONFIG_PATH);
+async function maybeStartOfficialProxy(origin, browser = DEFAULT_BROWSER) {
+  const config = await readJsonIfExists(configPathFor(browser));
   const officialHostPath = config?.officialHostPath;
   if (typeof officialHostPath !== "string" || officialHostPath.length === 0) {
     return null;

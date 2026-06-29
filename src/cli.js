@@ -1,6 +1,13 @@
 import { runMcpServer } from "./mcp-server.js";
 import { runNativeHost } from "./native-host.js";
-import { installNativeHost, nativeHostInstallStatus, uninstallNativeHost } from "./installer.js";
+import {
+  detectInstalledBrowsers,
+  detectManagedBrowsers,
+  installNativeHost,
+  nativeHostInstallStatus,
+  uninstallNativeHost,
+} from "./installer.js";
+import { DEFAULT_BROWSER, SUPPORTED_BROWSERS } from "./constants.js";
 import { listBridgeSockets } from "./bridge-client.js";
 import { probeLengthPrefixedSocket } from "./probe.js";
 
@@ -14,7 +21,10 @@ export async function runCli(argv) {
   }
 
   if (args.includes("--native-host") || looksLikeChromeOrigin(command)) {
-    await runNativeHost({ origin: looksLikeChromeOrigin(command) ? command : argv[3] });
+    // Chrome/Edge append the extension origin as a positional arg, so find it
+    // by shape rather than position (the `--browser` flag shifts the indices).
+    const origin = args.find(looksLikeChromeOrigin) ?? argv[3];
+    await runNativeHost({ origin, browser: normalizeBrowser(readOption(args, "--browser")) });
     return;
   }
 
@@ -22,20 +32,31 @@ export async function runCli(argv) {
     case "install-native-host": {
       const binPath = readOption(args, "--bin");
       const noProxy = args.includes("--no-proxy");
-      const result = await installNativeHost({ binPath, proxy: !noProxy });
+      const browsers = await resolveBrowsers(readOption(args, "--browser"), "install");
+      const result = {};
+      for (const browser of browsers) {
+        result[browser] = await installNativeHost({ binPath, proxy: !noProxy, browser });
+      }
       printJson(result);
       return;
     }
     case "uninstall-native-host": {
-      const result = await uninstallNativeHost({ force: args.includes("--force") });
+      const force = args.includes("--force");
+      const browsers = await resolveBrowsers(readOption(args, "--browser"), "uninstall");
+      const result = {};
+      for (const browser of browsers) {
+        result[browser] = await uninstallNativeHost({ force, browser });
+      }
       printJson(result);
       return;
     }
     case "status": {
-      printJson({
-        install: await nativeHostInstallStatus(),
-        sockets: await listBridgeSockets(),
-      });
+      const browsers = await resolveBrowsers(readOption(args, "--browser"), "status");
+      const install = {};
+      for (const browser of browsers) {
+        install[browser] = await nativeHostInstallStatus({ browser });
+      }
+      printJson({ install, sockets: await listBridgeSockets() });
       return;
     }
     case "probe-socket": {
@@ -66,6 +87,39 @@ function readOption(args, name) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+function normalizeBrowser(value) {
+  if (value == null) return DEFAULT_BROWSER;
+  const browser = String(value).toLowerCase();
+  if (!SUPPORTED_BROWSERS.includes(browser)) {
+    throw new Error(
+      `Unsupported browser: ${value}. Supported values: ${SUPPORTED_BROWSERS.join(", ")}, all.`,
+    );
+  }
+  return browser;
+}
+
+/**
+ * Map an optional `--browser` selector to the list of browsers a command acts
+ * on. With no selector each command auto-detects: install targets browsers
+ * present on the machine, uninstall targets browsers we previously installed,
+ * and status reports every supported browser.
+ */
+async function resolveBrowsers(selector, mode) {
+  if (selector && selector !== "all") {
+    return [normalizeBrowser(selector)];
+  }
+  if (selector === "all" || mode === "status") {
+    return [...SUPPORTED_BROWSERS];
+  }
+  if (mode === "install") {
+    const present = await detectInstalledBrowsers();
+    return present.length ? present : [DEFAULT_BROWSER];
+  }
+  // uninstall
+  const managed = await detectManagedBrowsers();
+  return managed.length ? managed : [DEFAULT_BROWSER];
+}
+
 function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -76,14 +130,16 @@ function printHelp() {
 Usage:
   codex-control-chrome-mcp --stdio
   codex-control-chrome-mcp --native-host
-  codex-control-chrome-mcp install-native-host [--bin /path/to/codex-control-chrome-mcp] [--no-proxy]
-  codex-control-chrome-mcp uninstall-native-host [--force]
-  codex-control-chrome-mcp status
+  codex-control-chrome-mcp install-native-host [--bin /path/to/codex-control-chrome-mcp] [--no-proxy] [--browser <chrome|edge|all>]
+  codex-control-chrome-mcp uninstall-native-host [--force] [--browser <chrome|edge|all>]
+  codex-control-chrome-mcp status [--browser <chrome|edge|all>]
   codex-control-chrome-mcp probe-socket <socket-path>
 
 Notes:
   --stdio is the MCP server mode for Agent tools.
-  --native-host is normally launched by Chrome through Native Messaging.
+  --native-host is normally launched by Chrome/Edge through Native Messaging.
   install-native-host without --bin writes a stable launcher that runs npx.
+  --browser selects a browser. Without it, install/uninstall auto-detect the
+  browsers present (or previously installed) and status reports both.
 `);
 }

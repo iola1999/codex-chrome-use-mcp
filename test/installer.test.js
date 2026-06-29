@@ -130,3 +130,54 @@ test("ensureNativeHostRegistered skips when nothing was ever installed", async (
   const result = await ensureNativeHostRegistered({ paths: tmpPaths(root) });
   assert.equal(result.action, "skip");
 });
+
+function browserPaths(root, appStateDir, browser) {
+  const suffix = browser === "chrome" ? "" : `.${browser}`;
+  return {
+    browser,
+    manifestPath: path.join(root, browser, "NativeMessagingHosts", `${CODEX_NATIVE_HOST_NAME}.json`),
+    appStateDir,
+    configPath: path.join(appStateDir, `config${suffix}.json`),
+    installStatePath: path.join(appStateDir, `install-state${suffix}.json`),
+  };
+}
+
+test("installing two browsers keeps independent state and restore metadata", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-control-chrome-mcp-test-"));
+  const appStateDir = path.join(root, "state");
+  const chrome = browserPaths(root, appStateDir, "chrome");
+  const edge = browserPaths(root, appStateDir, "edge");
+
+  // Each browser starts with its own distinct official manifest.
+  for (const paths of [chrome, edge]) {
+    await fs.mkdir(path.dirname(paths.manifestPath), { recursive: true });
+    const hostPath = path.join(root, `${paths.browser}-extension-host`);
+    await fs.writeFile(paths.manifestPath, `${JSON.stringify(officialManifest(hostPath), null, 2)}\n`, "utf8");
+  }
+
+  const chromeInstall = await installNativeHost({ paths: chrome });
+  const edgeInstall = await installNativeHost({ paths: edge });
+
+  // Per-browser launchers, recorded under each browser's own state file.
+  assert.equal(chromeInstall.browser, "chrome");
+  assert.equal(edgeInstall.browser, "edge");
+  assert.ok(chromeInstall.hostPath.endsWith("native-host-launcher"));
+  assert.ok(edgeInstall.hostPath.endsWith("native-host-launcher-edge"));
+  assert.notEqual(chrome.installStatePath, edge.installStatePath);
+
+  const edgeLauncher = await fs.readFile(edgeInstall.hostPath, "utf8");
+  assert.match(edgeLauncher, /--native-host --browser edge/);
+
+  // Installing edge must not have overwritten chrome's recorded restore target.
+  const chromeState = JSON.parse(await fs.readFile(chrome.installStatePath, "utf8"));
+  const edgeState = JSON.parse(await fs.readFile(edge.installStatePath, "utf8"));
+  assert.equal(chromeState.officialHostPath, path.join(root, "chrome-extension-host"));
+  assert.equal(edgeState.officialHostPath, path.join(root, "edge-extension-host"));
+
+  // Uninstalling edge restores edge's manifest and leaves chrome's untouched.
+  await uninstallNativeHost({ paths: edge });
+  const restoredEdge = JSON.parse(await fs.readFile(edge.manifestPath, "utf8"));
+  const chromeManifest = JSON.parse(await fs.readFile(chrome.manifestPath, "utf8"));
+  assert.equal(restoredEdge.path, path.join(root, "edge-extension-host"));
+  assert.equal(chromeManifest.description, MANIFEST_DESCRIPTION); // still ours
+});

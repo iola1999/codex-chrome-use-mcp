@@ -24,35 +24,47 @@ This is an independent community project. It is not affiliated with OpenAI, Code
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Tested | Primary supported platform. |
-| Linux | Experimental | Uses the Google Chrome user-level Native Messaging host directory. |
-| Windows | Unsupported | Chrome Native Messaging registration uses registry keys on Windows and is not implemented yet. |
+| Linux | Experimental | Uses the browser's user-level Native Messaging host directory. |
+| Windows | Unsupported | Native Messaging registration uses registry keys on Windows and is not implemented yet. |
+
+## Browser Support
+
+| Browser | Status | Notes |
+| --- | --- | --- |
+| Google Chrome | Tested | Default target. |
+| Microsoft Edge | Supported | Same Codex extension and `chrome-extension://` origin; installs to Edge's `NativeMessagingHosts` directory. |
+
+Commands accept `--browser <chrome|edge|all>`. Without it, `install-native-host` auto-detects the browsers present on the machine, `uninstall-native-host` targets every browser it previously installed for, and `status` reports both browsers.
 
 ## Install
 
-First install and enable the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) in the Chrome profile you want to automate.
+First install and enable the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) in the Chrome or Edge profile you want to automate.
 
 ```bash
 npx -y codex-control-chrome-mcp@latest install-native-host
 ```
 
-This writes a stable launcher:
+Without `--browser`, this installs for every supported browser whose profile directory exists. Pass `--browser <chrome|edge|all>` to target one explicitly.
+
+This writes a stable per-browser launcher (Edge uses the `-edge` suffix):
 
 ```text
 ~/.codex-control-chrome-mcp/native-host-launcher
+~/.codex-control-chrome-mcp/native-host-launcher-edge
 ```
 
-The launcher invokes:
+The launcher invokes (the `--browser` flag tells the host which browser's config to read for proxy mode):
 
 ```bash
-npx -y codex-control-chrome-mcp@1.0.0 --native-host "$@"
+npx -y codex-control-chrome-mcp@latest --native-host --browser chrome "$@"
 ```
 
-The installer:
+For each selected browser the installer:
 
-1. Reads the existing `com.openai.codexextension.json`.
+1. Reads the existing `com.openai.codexextension.json` in that browser's directory.
 2. Backs it up in the same directory with a timestamped suffix.
 3. Writes a new manifest pointing to this project's CLI.
-4. Records restore metadata in `~/.codex-control-chrome-mcp/install-state.json`.
+4. Records restore metadata in `~/.codex-control-chrome-mcp/install-state.json` (Chrome) or `install-state.<browser>.json` (other browsers), so browsers never clobber each other's state.
 5. Records the genuine OpenAI host path for proxy mode when available.
 
 ### Identifying the official host
@@ -70,16 +82,18 @@ When choosing the proxy target it prefers the **live** manifest (most up to date
 skips paths that no longer exist, so a renamed or removed host is never recorded as the
 official target. `status` reports these signals under `classification`.
 
-Example manifest path on macOS:
+Example manifest paths on macOS:
 
 ```text
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json
+~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.openai.codexextension.json
 ```
 
-Example manifest path on Linux:
+Example manifest paths on Linux:
 
 ```text
 ~/.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json
+~/.config/microsoft-edge/NativeMessagingHosts/com.openai.codexextension.json
 ```
 
 ## MCP Client Config
@@ -120,7 +134,7 @@ For local development:
 npx -y codex-control-chrome-mcp@latest uninstall-native-host
 ```
 
-This restores the backed-up official manifest if one was recorded.
+This restores the backed-up official manifest if one was recorded. Without `--browser` it uninstalls from every browser it previously installed for; pass `--browser <chrome|edge|all>` to scope it.
 
 Use `--force` only if the current manifest was manually edited and you still want to restore/remove it:
 
@@ -134,11 +148,13 @@ npx -y codex-control-chrome-mcp@latest uninstall-native-host --force
 npx -y codex-control-chrome-mcp@latest status
 ```
 
-This prints:
+This prints, per browser under `install.chrome` / `install.edge`:
 
 - active native host manifest
 - saved install state
-- discovered bridge sockets under `/tmp/codex-browser-use`
+- the `registered` flag and live-manifest `classification`
+
+and the discovered bridge sockets under `/tmp/codex-browser-use`. Pass `--browser` to scope it to one browser.
 
 ## Operational Notes
 
@@ -167,8 +183,8 @@ If `status` shows no sockets:
 1. Confirm Chrome is running with the profile where the extension is installed.
 2. Reload or disable/enable the Codex Chrome Extension.
 3. Run `npx -y codex-control-chrome-mcp@latest status`.
-4. Check `registered`. If it is `false` and `classification.kind` is `official-openai`, a Codex update reclaimed the manifest. The stdio server re-asserts it on next startup; reload the extension or restart Chrome to reconnect (or run `install-native-host` to repair immediately).
-5. When `registered` is `true`, the active manifest points to `~/.codex-control-chrome-mcp/native-host-launcher` (or your local launcher) and the extension just needs to connect.
+4. Check `install.<browser>.registered`. If it is `false` and `classification.kind` is `official-openai`, a Codex update reclaimed that browser's manifest. The stdio server re-asserts it on next startup; reload the extension or restart the browser to reconnect (or run `install-native-host` to repair immediately).
+5. When `registered` is `true`, the active manifest points to `~/.codex-control-chrome-mcp/native-host-launcher` (or the `-edge` variant, or your local launcher) and the extension just needs to connect.
 
 If Codex App integration is affected, uninstall this project:
 

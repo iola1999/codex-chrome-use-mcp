@@ -20,7 +20,7 @@ This is an independent community project. It is not affiliated with OpenAI, Code
 The current implementation provides:
 
 - official `@modelcontextprotocol/sdk` stdio server
-- Chrome Native Messaging host mode
+- Chrome and Microsoft Edge Native Messaging host mode
 - install/uninstall commands with manifest backup
 - JSON-RPC bridge socket under `/tmp/codex-browser-use`
 - Chrome tab, navigation, screenshot, CDP, and event MCP tools
@@ -36,14 +36,31 @@ The current implementation provides:
 
 Node.js 20 or newer is required. npm Trusted Publishing for releases uses Node.js 24 in GitHub Actions.
 
+## Browser Support
+
+Both Chromium browsers use the same Codex extension and the same `chrome-extension://` origin, so a single manifest works for either.
+
+| Browser | Status | Notes |
+| --- | --- | --- |
+| Google Chrome | Tested | Default target. |
+| Microsoft Edge | Supported | Same extension and native-messaging mechanism; installs to the Edge `NativeMessagingHosts` directory. |
+
+Commands accept `--browser <chrome\|edge\|all>`. Without the flag, `install-native-host` installs for every supported browser whose profile directory exists, `uninstall-native-host` targets every browser it previously installed for, and `status` reports both.
+
 ## Quick Start
 
-Install and enable the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) in the Chrome profile you want to automate.
+Install and enable the [Codex Chrome Extension](https://chromewebstore.google.com/detail/hehggadaopoacecdllhhajmbjkdcmajg) in the Chrome or Edge profile you want to automate.
 
-Install the Chrome native host:
+Install the native host (auto-detects the browsers present):
 
 ```bash
 npx -y codex-control-chrome-mcp@latest install-native-host
+```
+
+To target one browser explicitly:
+
+```bash
+npx -y codex-control-chrome-mcp@latest install-native-host --browser edge
 ```
 
 Configure your Agent to use the MCP stdio server:
@@ -144,7 +161,7 @@ node ./bin/codex-control-chrome-mcp.js --native-host
 
 ## Troubleshooting
 
-`status` reports a `registered` flag and a `classification` of the live manifest. When `registered` is `false` and `classification.kind` is `official-openai`, a Codex update has reclaimed the manifest (see below). `classification` identifies OpenAI's genuine host by stable signals — the `com.openai.codexextension` name, the official extension origin, the bundle path, the binary format, and (on macOS) the OpenAI code signature — not by filename.
+`status` reports, per browser (under `install.chrome` / `install.edge`), a `registered` flag and a `classification` of the live manifest. When `registered` is `false` and `classification.kind` is `official-openai`, a Codex update has reclaimed that browser's manifest (see below). `classification` identifies OpenAI's genuine host by stable signals — the `com.openai.codexextension` name, the official extension origin, the bundle path, the binary format, and (on macOS) the OpenAI code signature — not by filename.
 
 ### A Codex update stopped the bridge
 
