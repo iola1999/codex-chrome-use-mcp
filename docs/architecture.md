@@ -203,20 +203,16 @@ Agent-side MCP config should use:
 }
 ```
 
-Chrome Native Messaging manifests cannot store command arguments. Therefore `install-native-host` creates a stable launcher script:
-
-```sh
-npx -y codex-control-chrome-mcp@latest install-native-host
-```
+Chrome Native Messaging manifests cannot store command arguments. Therefore `install-native-host` writes a stable launcher script at:
 
 ```text
 ~/.codex-control-chrome-mcp/native-host-launcher
 ```
 
-That launcher runs:
+That launcher runs (the `--browser` flag tells the host which browser's proxy config to read):
 
 ```sh
-npx -y codex-control-chrome-mcp@1.0.0 --native-host "$@"
+npx -y codex-control-chrome-mcp@latest --native-host --browser chrome "$@"
 ```
 
 The native host manifest points to the launcher, not directly to `npx`.

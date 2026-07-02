@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-07-03
+
+### Fixed
+
+- Native host failed to start on 1.2.0. The install launcher runs the host with `--browser <name>` before the extension origin that Chrome appends, so the origin was no longer `args[0]`. The CLI dispatcher only recognized native-host mode when the origin was `args[0]`, so the launcher's argv fell through to `Unknown command: --browser` and the host exited on every connect. The visible symptoms were the Codex extension connection flapping between connected/disconnected and `status` never listing a bridge socket (`sockets: []`). The dispatcher now detects the origin by shape anywhere in the args, and a regression test covers the launcher argv.
+
 ## [1.2.0] - 2026-06-29
 
 ### Added

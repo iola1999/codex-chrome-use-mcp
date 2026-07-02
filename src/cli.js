@@ -13,21 +13,19 @@ import { probeLengthPrefixedSocket } from "./probe.js";
 
 export async function runCli(argv) {
   const args = argv.slice(2);
-  const command = args[0];
+  const invocation = classifyInvocation(args);
 
-  if (args.includes("--stdio") || command === "stdio") {
+  if (invocation.mode === "mcp") {
     await runMcpServer();
     return;
   }
 
-  if (args.includes("--native-host") || looksLikeChromeOrigin(command)) {
-    // Chrome/Edge append the extension origin as a positional arg, so find it
-    // by shape rather than position (the `--browser` flag shifts the indices).
-    const origin = args.find(looksLikeChromeOrigin) ?? argv[3];
-    await runNativeHost({ origin, browser: normalizeBrowser(readOption(args, "--browser")) });
+  if (invocation.mode === "native-host") {
+    await runNativeHost({ origin: invocation.origin ?? argv[3], browser: invocation.browser });
     return;
   }
 
+  const command = invocation.command;
   switch (command) {
     case "install-native-host": {
       const binPath = readOption(args, "--bin");
@@ -76,6 +74,31 @@ export async function runCli(argv) {
     default:
       throw new Error(`Unknown command: ${command}`);
   }
+}
+
+/**
+ * Decide how an invocation should be handled, purely from the CLI args.
+ *
+ * Chrome/Edge launch the native host by appending the extension origin as a
+ * positional arg, and the install launcher prepends `--browser <name>`. That
+ * prefix shifts the origin out of `args[0]`, so both the mode check and the
+ * origin lookup must scan by shape rather than position. (A 1.2.0 regression
+ * only checked `args[0]` here, so the launcher's `--browser`-prefixed argv fell
+ * through to `Unknown command: --browser` and the native host exited on every
+ * connect.)
+ */
+export function classifyInvocation(args) {
+  if (args.includes("--stdio") || args[0] === "stdio") {
+    return { mode: "mcp" };
+  }
+  if (args.includes("--native-host") || args.some(looksLikeChromeOrigin)) {
+    return {
+      mode: "native-host",
+      origin: args.find(looksLikeChromeOrigin),
+      browser: normalizeBrowser(readOption(args, "--browser")),
+    };
+  }
+  return { mode: "command", command: args[0] };
 }
 
 function looksLikeChromeOrigin(value) {

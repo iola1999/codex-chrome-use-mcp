@@ -8,13 +8,6 @@ Package:
 
 ## Development Status
 
-The current implementation provides:
-
-- MCP stdio mode: `npx -y codex-control-chrome-mcp@latest --stdio`
-- manifest install: `npx -y codex-control-chrome-mcp@latest install-native-host`
-- manifest uninstall: `npx -y codex-control-chrome-mcp@latest uninstall-native-host`
-- bridge/socket status: `npx -y codex-control-chrome-mcp@latest status`
-
 Do not run install on a machine where Codex Chrome integration is important unless you are ready to test proxy mode or restore from backup.
 
 This is an independent community project. It is not affiliated with OpenAI, Codex, Google, or Chrome.
